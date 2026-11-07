@@ -107,12 +107,12 @@ jobs:
           # Hermes routes LLM API calls through HTTPS_PROXY/HTTP_PROXY and
           # honours NO_PROXY. OpenRouter is blocked from Russia, so reuse the
           # Xray chain endpoint by default; set OPENROUTER_PROXY=direct to
-          # disable. DeepSeek keeps the direct route.
+          # disable. DeepSeek goes through the same proxy.
           if [[ "$OPENROUTER_PROXY" != "direct" && "$OPENROUTER_PROXY" != "none" ]]; then
             secret_args+=(
               --from-literal=HTTPS_PROXY="$OPENROUTER_PROXY"
               --from-literal=HTTP_PROXY="$OPENROUTER_PROXY"
-              --from-literal=NO_PROXY="127.0.0.1,localhost,::1,api.deepseek.com"
+              --from-literal=NO_PROXY="127.0.0.1,localhost,::1"
             )
           fi
           # Recreate rather than apply: apply merges against the last-applied

@@ -46,7 +46,7 @@ Optional environment variables:
 | --- | --- |
 | `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs authorized to use Hermes. Required; not sensitive, so it lives as a variable |
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
-| `OPENROUTER_PROXY` | Override the proxy used for OpenRouter/LLM API calls; defaults to the same Xray chain endpoint. Set `direct` to disable proxying |
+| `OPENROUTER_PROXY` | Override the proxy used for all LLM API calls (OpenRouter and DeepSeek); defaults to the same Xray chain endpoint. Set `direct` to disable proxying |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -56,11 +56,10 @@ values. A push to
 `master` runs chart checks and deploys after they pass. `workflow_dispatch`
 runs the same checks before deploying. Secrets are scoped to this repository's
 production environment; Penny's GitHub environment does not share them.
-Telegram and OpenRouter traffic use x13's Xray `10808` chain endpoint because
-their direct routes are blocked at home. Hermes applies `OPENROUTER_PROXY` as
-`HTTPS_PROXY`/`HTTP_PROXY` for LLM calls and sets
-`NO_PROXY=127.0.0.1,localhost,::1,api.deepseek.com`, so DeepSeek keeps the
-direct route.
+Telegram and LLM API traffic (OpenRouter and DeepSeek) use x13's Xray `10808`
+chain endpoint because their direct routes are blocked at home. Hermes applies
+`OPENROUTER_PROXY` as `HTTPS_PROXY`/`HTTP_PROXY` for LLM calls and sets
+`NO_PROXY=127.0.0.1,localhost,::1`, so only loopback bypasses the proxy.
 
 ## First deployment and checks
 
@@ -118,25 +117,25 @@ Or switch to any other OpenRouter model with
 `/opt/data/config.yaml`, then restart the deployment. Do not put API keys in
 `values.yaml`.
 
-### OpenRouter through the proxy
+### LLM traffic through the proxy
 
-OpenRouter is blocked from Russia, so the deployment proxies LLM API calls.
-Hermes reads `HTTPS_PROXY`/`HTTP_PROXY` (and `ALL_PROXY`) for its OpenAI-compatible
-clients, including streams, auxiliary calls, and fallbacks. The `10808` Xray
-chain endpoint is reused by default.
+OpenRouter and DeepSeek are blocked from Russia, so the deployment proxies all
+LLM API calls. Hermes reads `HTTPS_PROXY`/`HTTP_PROXY` (and `ALL_PROXY`) for its
+OpenAI-compatible clients, including streams, auxiliary calls, and fallbacks.
+The `10808` Xray chain endpoint is reused by default.
 
 ```bash
 # In the hermes-env Secret
 HTTPS_PROXY=socks5://192.168.1.100:10808
 HTTP_PROXY=socks5://192.168.1.100:10808
-NO_PROXY=127.0.0.1,localhost,::1,api.deepseek.com
+NO_PROXY=127.0.0.1,localhost,::1
 ```
 
-Telegram uses its own `TELEGRAM_PROXY` (which overrides `HTTPS_PROXY`), and
-`NO_PROXY` keeps DeepSeek on the direct route. `NO_PROXY` supports exact hosts,
-domain suffixes, CIDR ranges, `*.` wildcards, and `host:port` entries. Set
-`OPENROUTER_PROXY=direct` in the GitHub environment variables to disable the
-LLM proxy.
+Telegram uses its own `TELEGRAM_PROXY` (which overrides `HTTPS_PROXY`). Only
+loopback bypasses the proxy; `NO_PROXY` supports exact hosts, domain suffixes,
+CIDR ranges, `*.` wildcards, and `host:port` entries if you later need to
+exempt something. Set `OPENROUTER_PROXY=direct` in the GitHub environment
+variables to disable the LLM proxy.
 
 A `socks5://` proxy requires the image's `httpx[socks]` support; if the pod
 reports a SOCKS transport error, point the proxy at an HTTP CONNECT port on
