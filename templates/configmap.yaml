@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-bootstrap
+  labels:
+    {{- include "hermes.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.initialConfig | nindent 4 }}

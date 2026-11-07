@@ -1,0 +1,44 @@
+image:
+  repository: nousresearch/hermes-agent
+  tag: v0.23.0
+  pullPolicy: IfNotPresent
+
+# The deployment workflow creates this Secret from GitHub Environment Secrets.
+existingSecret: hermes-env
+
+# Copied into /opt/data/config.yaml only when the data volume is first created.
+# Later configuration changes are made through Hermes and persist on the volume.
+initialConfig:
+  model:
+    provider: openrouter
+    default: nvidia/nemotron-3.5-super-vl:free
+  terminal:
+    backend: local
+
+persistence:
+  size: 5Gi
+  storageClassName: local-path
+
+nodeSelector:
+  homelab.morjoff.com/workload: home
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: home
+    effect: NoSchedule
+
+# x13's host resolver is a systemd-resolved stub; use its LAN resolver in pods.
+dns:
+  nameservers:
+    - 192.168.1.1
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+sharedMemory:
+  sizeLimit: 512Mi

@@ -1,0 +1,6 @@
+.git/
+.github/
+.agents/
+.aws/
+.codex/
+*.tar.gz
