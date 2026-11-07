@@ -115,9 +115,12 @@ jobs:
               --from-literal=NO_PROXY="127.0.0.1,localhost,::1,api.deepseek.com"
             )
           fi
-          kubectl -n hermes create secret generic hermes-env \
-            "${secret_args[@]}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # Recreate rather than apply: apply merges against the last-applied
+          # config, so keys removed from GitHub (for example a retired
+          # provider key) can linger. Delete + create makes the Secret match
+          # the workflow inputs exactly.
+          kubectl -n hermes delete secret hermes-env --ignore-not-found
+          kubectl -n hermes create secret generic hermes-env "${secret_args[@]}"
 
           helm upgrade --install hermes . --namespace hermes \
             --set-string image.tag="$HERMES_IMAGE_TAG" \

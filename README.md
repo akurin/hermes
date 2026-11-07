@@ -49,8 +49,10 @@ Optional environment variables:
 | `OPENROUTER_PROXY` | Override the proxy used for OpenRouter/LLM API calls; defaults to the same Xray chain endpoint. Set `direct` to disable proxying |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
-The workflow creates or updates the `hermes-env` Kubernetes Secret before Helm
-installs the chart. No secret values are placed in chart values. A push to
+The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
+the chart: it deletes the old Secret and creates it from the workflow inputs, so
+keys removed from GitHub do not linger. No secret values are placed in chart
+values. A push to
 `master` runs chart checks and deploys after they pass. `workflow_dispatch`
 runs the same checks before deploying. Secrets are scoped to this repository's
 production environment; Penny's GitHub environment does not share them.
