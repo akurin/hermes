@@ -85,7 +85,9 @@ jobs:
           fi
           export KUBECONFIG="$RUNNER_TEMP/hermes-kubeconfig"
           printf '%s' "$KUBECONFIG_CONTENT" > "$KUBECONFIG"
-          printf '%s' "$CI_DEPLOY_SSH_KEY" > "$RUNNER_TEMP/hermes-ssh-key"
+          # GitHub strips the trailing newline from secret values; ssh-keygen
+          # and OpenSSH refuse to load a key without it ("error in libcrypto").
+          printf '%s\n' "$CI_DEPLOY_SSH_KEY" > "$RUNNER_TEMP/hermes-ssh-key"
           chmod 600 "$RUNNER_TEMP/hermes-ssh-key"
           ssh -o StrictHostKeyChecking=accept-new \
             -i "$RUNNER_TEMP/hermes-ssh-key" \
