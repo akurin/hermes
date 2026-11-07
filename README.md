@@ -12,16 +12,18 @@ Service, Ingress, or public listener. Telegram uses outbound long polling.
 - `/opt/data` is a 5 GiB `local-path` PVC on x13. It contains Hermes config,
   sessions, skills, memories, credentials written by Hermes, and its SQLite
   database. Back it up outside the cluster; deleting the PVC deletes its data.
-- The chart copies `initialConfig` to `/opt/data/config.yaml` **only when that
-  file does not yet exist**. Subsequent Hermes config changes persist there.
-  Changing `initialConfig` in Helm values does not replace a live config file.
+- `managedConfig` is rendered to a ConfigMap mounted at `/etc/hermes/config.yaml`
+  and enabled through Hermes' managed scope (`HERMES_MANAGED_DIR=/etc/hermes`).
+  Pinned keys win over `/opt/data/config.yaml` and the environment on every
+  start, so chart changes apply without touching the PVC. Keys not listed there
+  stay editable and persist in `/opt/data/config.yaml`.
 - Terminal and code tools run inside the Hermes pod using the `local` backend.
   The pod has no host mounts, Docker socket, host networking, or Kubernetes
   API token. Tools can still access files and environment variables inside
   their own pod, including the gateway credentials.
 - The official image starts as root for s6 initialization, then runs the
   supervised Hermes service as UID 10000. Its startup hook fixes ownership of
-  the data directory and seeded config file for that UID.
+  the data directory for that UID.
 
 The chart defaults to `nousresearch/hermes-agent:v0.23.0`. Change
 `HERMES_IMAGE_TAG` in the production GitHub environment to upgrade to a tested
@@ -86,11 +88,38 @@ Hermes stores its state database under `/opt/data` in SQLite WAL mode. The
 alone as a backup; use a consistent SQLite backup or stop Hermes before copying
 the volume. The volume also contains sensitive conversations and credentials.
 
-To change the model later, edit `/opt/data/config.yaml` through Hermes' config
-commands in the pod, or reinitialize a new volume with changed `initialConfig`.
-The initial config sets OpenRouter's free
-`nvidia/nemotron-3.5-super-vl:free` model as the default and keeps the terminal
-backend local to the pod.
+`managedConfig` in `values.yaml` is the source of truth for the keys it lists.
+It renders to the `hermes-managed` ConfigMap, mounted read-only at
+`/etc/hermes`; `HERMES_MANAGED_DIR` enables managed scope. A checksum
+annotation on the pod makes a config change trigger a rollout, so a Helm upgrade
+applies it immediately.
+
+```yaml
+managedConfig:
+  model:
+    provider: openrouter
+    default: nvidia/nemotron-3.5-super-vl:free
+    base_url: https://openrouter.ai/api/v1
+  terminal:
+    backend: local
+```
+
+Managed keys are leaf-level: pinning `model.*` does not freeze the rest of the
+config. Hermes refuses `hermes config set` on a pinned key, and managed values
+win over the PVC config and the environment. Everything else remains editable
+on the volume and survives redeploys. Because the managed file is world-readable
+by design, API keys stay in the `hermes-env` Secret rather than the managed
+`.env` layer.
+
+Verify the policy from inside the pod:
+
+```bash
+kubectl -n hermes exec deploy/hermes -c hermes -- hermes config
+kubectl -n hermes exec deploy/hermes -c hermes -- hermes doctor
+```
+
+`hermes config` names the managed source and pinned keys; `hermes doctor`
+reports the resolved managed directory.
 
 ### Models: OpenRouter default and DeepSeek fallback
 
@@ -112,10 +141,10 @@ DeepSeek for a session with:
 ```
 
 Or switch to any other OpenRouter model with
-`/model openrouter:<model-id>`. To change the default, edit
-`model.default` in a new volume's `initialConfig` or in the live
-`/opt/data/config.yaml`, then restart the deployment. Do not put API keys in
-`values.yaml`.
+`/model openrouter:<model-id>`. To change the default, edit `managedConfig` in
+`values.yaml` and redeploy. `model.provider`, `model.default`, and
+`model.base_url` are pinned, so a stale base URL on the PVC cannot redirect
+OpenRouter traffic. Do not put API keys in `values.yaml`.
 
 ### LLM traffic through the proxy
 

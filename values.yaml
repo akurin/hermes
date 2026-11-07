@@ -6,12 +6,16 @@ image:
 # The deployment workflow creates this Secret from GitHub Environment Secrets.
 existingSecret: hermes-env
 
-# Copied into /opt/data/config.yaml only when the data volume is first created.
-# Later configuration changes are made through Hermes and persist on the volume.
-initialConfig:
+# Rendered to a ConfigMap mounted at /etc/hermes/config.yaml and read through
+# Hermes' managed scope. Pinned keys win over /opt/data/config.yaml and the
+# environment, and hermes config set refuses to change them. Everything not
+# listed here stays editable on the PVC.
+managedConfig:
   model:
     provider: openrouter
     default: nvidia/nemotron-3.5-super-vl:free
+    # Pin the canonical endpoint so a stale base_url on the PVC cannot leak in.
+    base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
 

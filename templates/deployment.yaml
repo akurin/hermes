@@ -15,6 +15,10 @@ spec:
     metadata:
       labels:
         {{- include "hermes.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pod when the managed config changes, so the new
+        # /etc/hermes/config.yaml is picked up on the next start.
+        checksum/managed-config: {{ .Values.managedConfig | toYaml | sha256sum }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 60
@@ -31,23 +35,6 @@ spec:
         nameservers:
           {{- toYaml . | nindent 10 }}
       {{- end }}
-      initContainers:
-        - name: initialize-home
-          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -ec
-            - |
-              if [ ! -f /opt/data/config.yaml ]; then
-                cp /bootstrap/config.yaml /opt/data/config.yaml
-              fi
-          volumeMounts:
-            - name: data
-              mountPath: /opt/data
-            - name: bootstrap
-              mountPath: /bootstrap
-              readOnly: true
       containers:
         - name: hermes
           image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
@@ -61,6 +48,8 @@ spec:
           env:
             - name: HERMES_HOME
               value: /opt/data
+            - name: HERMES_MANAGED_DIR
+              value: /etc/hermes
             - name: API_SERVER_ENABLED
               value: "false"
             - name: HERMES_DASHBOARD
@@ -70,15 +59,18 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/data
+            - name: managed-config
+              mountPath: /etc/hermes
+              readOnly: true
             - name: dshm
               mountPath: /dev/shm
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-data
-        - name: bootstrap
+        - name: managed-config
           configMap:
-            name: {{ .Release.Name }}-bootstrap
+            name: {{ .Release.Name }}-managed
         - name: dshm
           emptyDir:
             medium: Memory
