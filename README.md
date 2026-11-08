@@ -103,7 +103,7 @@ applies it immediately.
 managedConfig:
   model:
     provider: openrouter
-    default: nvidia/nemotron-3.5-super-vl:free
+    default: stealth/crouton-alpha
     base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
