@@ -30,7 +30,7 @@ splitProxy:
 managedConfig:
   model:
     provider: openrouter
-    default: nvidia/nemotron-3.5-super-vl:free
+    default: stealth/crouton-alpha
     # Pin the canonical endpoint so a stale base_url on the PVC cannot leak in.
     base_url: https://openrouter.ai/api/v1
   terminal:

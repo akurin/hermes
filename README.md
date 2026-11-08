@@ -131,7 +131,7 @@ reports the resolved managed directory.
 ```yaml
 model:
   provider: openrouter
-  default: nvidia/nemotron-3.5-super-vl:free
+  default: stealth/crouton-alpha
 ```
 
 OpenRouter uses its built-in provider, so the default
