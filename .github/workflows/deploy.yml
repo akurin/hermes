@@ -72,6 +72,7 @@ jobs:
           LMSTUDIO_API_URL: ${{ vars.LMSTUDIO_API_URL }}
           # LM Studio auth is optional; a placeholder keeps keyless servers working.
           LM_API_KEY: ${{ secrets.LM_API_KEY || 'lm-studio' }}
+          LMSTUDIO_MODEL: ${{ vars.LMSTUDIO_MODEL }}
           HERMES_IMAGE_TAG: ${{ vars.HERMES_IMAGE_TAG || 'v0.23.0' }}
         run: |
           set -euo pipefail
@@ -137,6 +138,11 @@ jobs:
               --set-string 'managedConfig.providers.lmstudio-lan.api'="$LMSTUDIO_API_URL"
               --set-string 'managedConfig.providers.lmstudio-lan.key_env'=LM_API_KEY
             )
+            if [[ -n "${LMSTUDIO_MODEL:-}" ]]; then
+              helm_args+=(
+                --set-string 'managedConfig.providers.lmstudio-lan.default_model'="$LMSTUDIO_MODEL"
+              )
+            fi
           fi
           helm upgrade --install hermes . --namespace hermes \
             "${helm_args[@]}" --atomic --wait --timeout 15m

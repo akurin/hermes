@@ -56,6 +56,7 @@ Optional environment variables:
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
 | `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
 | `LMSTUDIO_API_URL` | Set to enable the `lmstudio-lan` provider. The workflow injects it into `managedConfig`; no LAN address is stored in the chart. Unset means no provider |
+| `LMSTUDIO_MODEL` | Optional chat model ID for `lmstudio-lan` (e.g. `google/gemma-4-26b-a4b-qat`). Injected as `default_model`, guaranteeing a picker entry when live discovery is cold |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -179,7 +180,9 @@ Switch per session:
 
 `model.provider` and `model.base_url` stay pinned to OpenRouter for the default;
 the local provider is selectable per session. Change the URL by updating the
-`LMSTUDIO_API_URL` variable and redeploying — no PVC edit needed.
+`LMSTUDIO_API_URL` variable and redeploying — no PVC edit needed. Setting
+`LMSTUDIO_MODEL` adds a `default_model` entry so the picker has a model even
+when the live catalog probe is cold.
 
 Requirements:
 
