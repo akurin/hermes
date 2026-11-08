@@ -42,12 +42,6 @@ managedConfig:
     provider: openrouter
     # Pin the canonical endpoint so a stale base_url on the PVC cannot leak in.
     base_url: https://openrouter.ai/api/v1
-  providers:
-    # Selectable per session with /model custom:lmstudio-lan:<model-id>.
-    # The URL is overridden by the LMSTUDIO_API_URL GitHub variable.
-    lmstudio-lan:
-      api: http://192.168.1.101:1234/v1
-      key_env: LM_API_KEY
   terminal:
     backend: local
 

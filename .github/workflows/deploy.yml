@@ -69,7 +69,7 @@ jobs:
           TELEGRAM_PROXY: ${{ vars.TELEGRAM_PROXY || 'socks5://192.168.1.100:10808' }}
           OPENROUTER_PROXY: ${{ vars.OPENROUTER_PROXY || 'socks5://192.168.1.100:10808' }}
           NO_PROXY: ${{ vars.NO_PROXY || '127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16' }}
-          LMSTUDIO_API_URL: ${{ vars.LMSTUDIO_API_URL || 'http://192.168.1.101:1234/v1' }}
+          LMSTUDIO_API_URL: ${{ vars.LMSTUDIO_API_URL }}
           # LM Studio auth is optional; a placeholder keeps keyless servers working.
           LM_API_KEY: ${{ secrets.LM_API_KEY || 'lm-studio' }}
           HERMES_IMAGE_TAG: ${{ vars.HERMES_IMAGE_TAG || 'v0.23.0' }}
@@ -127,9 +127,18 @@ jobs:
           kubectl -n hermes delete secret hermes-env --ignore-not-found
           kubectl -n hermes create secret generic hermes-env "${secret_args[@]}"
 
+          # LM Studio is opt-in: the provider is injected only when the GitHub
+          # environment variable is set, so the chart contains no LAN address.
+          helm_args=(
+            --set-string image.tag="$HERMES_IMAGE_TAG"
+          )
+          if [[ -n "${LMSTUDIO_API_URL:-}" ]]; then
+            helm_args+=(
+              --set-string 'managedConfig.providers.lmstudio-lan.api'="$LMSTUDIO_API_URL"
+              --set-string 'managedConfig.providers.lmstudio-lan.key_env'=LM_API_KEY
+            )
+          fi
           helm upgrade --install hermes . --namespace hermes \
-            --set-string image.tag="$HERMES_IMAGE_TAG" \
-            --set-string 'managedConfig.providers.lmstudio-lan.api'="$LMSTUDIO_API_URL" \
-            --atomic --wait --timeout 15m
+            "${helm_args[@]}" --atomic --wait --timeout 15m
           kubectl -n hermes rollout restart deployment/hermes
           kubectl -n hermes rollout status deployment/hermes --timeout=300s

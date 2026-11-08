@@ -55,7 +55,7 @@ Optional environment variables:
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
 | `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
-| `LMSTUDIO_API_URL` | LM Studio base URL used by the `lmstudio-lan` provider; defaults to `http://192.168.1.101:1234/v1` |
+| `LMSTUDIO_API_URL` | Set to enable the `lmstudio-lan` provider. The workflow injects it into `managedConfig`; no LAN address is stored in the chart. Unset means no provider |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -106,10 +106,6 @@ managedConfig:
   model:
     provider: openrouter
     base_url: https://openrouter.ai/api/v1
-  providers:
-    lmstudio-lan:
-      api: http://192.168.1.101:1234/v1
-      key_env: LM_API_KEY
   terminal:
     backend: local
 
@@ -166,10 +162,10 @@ the provider itself still requires a chart change. Do not put API keys in
 
 ### Local models via LM Studio
 
-The chart deploys LM Studio as the `providers.lmstudio-lan` entry, so it is
-managed from GitHub Actions. The base URL comes from the `LMSTUDIO_API_URL`
-variable (default `http://192.168.1.101:1234/v1`); the token comes from the
-optional `LM_API_KEY` secret.
+The chart contains no LM Studio address. When the `LMSTUDIO_API_URL` GitHub
+environment variable is set, the deploy workflow injects the
+`providers.lmstudio-lan` entry with that URL; the token comes from the optional
+`LM_API_KEY` secret. Unset the variable and redeploy to remove the provider.
 
 All private and link-local networks (`10.0.0.0/8`, `172.16.0.0/12`,
 `192.168.0.0/16`, `169.254.0.0/16`) bypass the sidecar, so LAN requests connect
