@@ -53,7 +53,7 @@ Optional environment variables:
 | `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs authorized to use Hermes. Required; not sensitive, so it lives as a variable |
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
-| `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar sets its own loopback-only list. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
+| `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -158,18 +158,29 @@ DeepSeek. Because `model.provider` and `model.base_url` are pinned, changing
 the provider itself still requires a chart change. Do not put API keys in
 `values.yaml`.
 
-### Local models via LM Studio
+### Local models (manual)
 
-LM Studio at `192.168.1.101:1234` is a named custom provider, selectable per
-session without changing the OpenRouter default:
+The chart does not hardcode any local model server or IP. All private and
+link-local networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+`169.254.0.0/16`) bypass the sidecar, so LAN requests connect directly.
+
+Add LM Studio (or Ollama/vLLM) once, in the PVC config:
 
 ```bash
+kubectl -n hermes exec deploy/hermes -c hermes -- \
+  hermes config set providers.lmstudio-lan.api http://192.168.1.101:1234/v1
+```
+
+Then switch per session:
+
+```
 /model custom:lmstudio-lan:<model-id>
 ```
 
-`managedConfig.providers.lmstudio-lan` points at
-`http://192.168.1.101:1234/v1`, and `splitProxy.noProxy` contains
-`192.168.1.101`, so local requests bypass the sidecar and connect directly.
+`providers` is not managed, so this is allowed even though `model.provider`
+and `model.base_url` stay pinned to OpenRouter. The change lives in
+`/opt/data/config.yaml`, so it persists across Helm upgrades and is not reset
+by the chart.
 
 Requirements:
 
@@ -185,10 +196,9 @@ Verify from the pod:
 curl --noproxy '*' -sS http://192.168.1.101:1234/v1/models
 ```
 
-Making LM Studio the default would require changing the managed
-`model.provider` (and the pinned OpenRouter `model.base_url`), which also
-changes the default routing for every session; per-session switching avoids
-that.
+To make a local model the default, you would have to change the managed
+`model.provider` and `model.base_url`, which also changes routing for every
+session; per-session switching avoids that.
 
 ### Split proxy sidecar
 
@@ -223,7 +233,10 @@ splitProxy:
     - 127.0.0.1
     - localhost
     - "::1"
-    - 192.168.1.101
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 169.254.0.0/16
 ```
 
 Add `deepseek.com` or search domains if they should be tunneled. Set
