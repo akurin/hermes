@@ -68,6 +68,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TELEGRAM_PROXY: ${{ vars.TELEGRAM_PROXY || 'socks5://192.168.1.100:10808' }}
           OPENROUTER_PROXY: ${{ vars.OPENROUTER_PROXY || 'socks5://192.168.1.100:10808' }}
+          NO_PROXY: ${{ vars.NO_PROXY || '127.0.0.1,localhost,::1' }}
           HERMES_IMAGE_TAG: ${{ vars.HERMES_IMAGE_TAG || 'v0.23.0' }}
         run: |
           set -euo pipefail
@@ -112,7 +113,7 @@ jobs:
             secret_args+=(
               --from-literal=HTTPS_PROXY="$OPENROUTER_PROXY"
               --from-literal=HTTP_PROXY="$OPENROUTER_PROXY"
-              --from-literal=NO_PROXY="127.0.0.1,localhost,::1"
+              --from-literal=NO_PROXY="$NO_PROXY"
             )
           fi
           # Recreate rather than apply: apply merges against the last-applied

@@ -49,6 +49,7 @@ Optional environment variables:
 | `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs authorized to use Hermes. Required; not sensitive, so it lives as a variable |
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
 | `OPENROUTER_PROXY` | Override the proxy used for all LLM API calls (OpenRouter and DeepSeek); defaults to the same Xray chain endpoint. Set `direct` to disable proxying |
+| `NO_PROXY` | Comma-separated hosts that bypass the proxy; defaults to `127.0.0.1,localhost,::1`. Add `exa.ai,parallel.ai,keenable.ai` to send keyless web search direct |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -160,11 +161,22 @@ HTTP_PROXY=socks5://192.168.1.100:10808
 NO_PROXY=127.0.0.1,localhost,::1
 ```
 
-Telegram uses its own `TELEGRAM_PROXY` (which overrides `HTTPS_PROXY`). Only
-loopback bypasses the proxy; `NO_PROXY` supports exact hosts, domain suffixes,
-CIDR ranges, `*.` wildcards, and `host:port` entries if you later need to
-exempt something. Set `OPENROUTER_PROXY=direct` in the GitHub environment
-variables to disable the LLM proxy.
+Telegram uses its own `TELEGRAM_PROXY` (which overrides `HTTPS_PROXY`).
+`NO_PROXY` supports exact hosts, domain suffixes, CIDR ranges, `*.` wildcards,
+and `host:port` entries. Hermes has no per-provider proxy: the env proxy applies
+to every LLM client and to `requests`-based tools. To keep web search direct,
+add its domains to `NO_PROXY`:
+
+```bash
+gh variable set NO_PROXY --env production --repo akurin/hermes \
+  --body '127.0.0.1,localhost,::1,exa.ai,parallel.ai,keenable.ai,firecrawl.dev'
+```
+
+This also avoids the `Missing dependencies for SOCKS support.` error in
+`requests`-based search backends, provided those hosts are reachable directly
+from x13. If they are blocked, use an HTTP CONNECT proxy instead of SOCKS, or
+build an image with PySocks. Set `OPENROUTER_PROXY=direct` in the GitHub
+environment variables to disable the LLM proxy entirely.
 
 A `socks5://` proxy requires the image's `httpx[socks]` support; if the pod
 reports a SOCKS transport error, point the proxy at an HTTP CONNECT port on
