@@ -6,6 +6,23 @@ image:
 # The deployment workflow creates this Secret from GitHub Environment Secrets.
 existingSecret: hermes-env
 
+# Split proxy sidecar. The main container gets an HTTP proxy on loopback; only
+# the listed domains go through the x13 SOCKS chain, everything else connects
+# directly. HTTP is used so requests/httpx clients need no SOCKS dependency.
+splitProxy:
+  enabled: true
+  port: 8118
+  socksEndpoint: 192.168.1.100:10808
+  domains:
+    - openrouter.ai
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
 # Rendered to a ConfigMap mounted at /etc/hermes/config.yaml and read through
 # Hermes' managed scope. Pinned keys win over /opt/data/config.yaml and the
 # environment, and hermes config set refuses to change them. Everything not

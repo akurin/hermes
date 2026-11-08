@@ -17,6 +17,10 @@ Service, Ingress, or public listener. Telegram uses outbound long polling.
   Pinned keys win over `/opt/data/config.yaml` and the environment on every
   start, so chart changes apply without touching the PVC. Keys not listed there
   stay editable and persist in `/opt/data/config.yaml`.
+- A native `split-proxy` sidecar listens on loopback and is an HTTP CONNECT
+  proxy: only `splitProxy.domains` (default `openrouter.ai`) go through x13's
+  SOCKS chain; all other traffic goes direct. It uses the Hermes image, so no
+  extra proxy image is needed.
 - Terminal and code tools run inside the Hermes pod using the `local` backend.
   The pod has no host mounts, Docker socket, host networking, or Kubernetes
   API token. Tools can still access files and environment variables inside
@@ -48,8 +52,8 @@ Optional environment variables:
 | --- | --- |
 | `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs authorized to use Hermes. Required; not sensitive, so it lives as a variable |
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
-| `OPENROUTER_PROXY` | Override the proxy used for all LLM API calls (OpenRouter and DeepSeek); defaults to the same Xray chain endpoint. Set `direct` to disable proxying |
-| `NO_PROXY` | Comma-separated hosts that bypass the proxy; defaults to `127.0.0.1,localhost,::1`. Add `exa.ai,parallel.ai,keenable.ai` to send keyless web search direct |
+| `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
+| `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar sets its own loopback-only list. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -147,37 +151,51 @@ Or switch to any other OpenRouter model with
 `model.base_url` are pinned, so a stale base URL on the PVC cannot redirect
 OpenRouter traffic. Do not put API keys in `values.yaml`.
 
-### LLM traffic through the proxy
+### Split proxy sidecar
 
-OpenRouter and DeepSeek are blocked from Russia, so the deployment proxies all
-LLM API calls. Hermes reads `HTTPS_PROXY`/`HTTP_PROXY` (and `ALL_PROXY`) for its
-OpenAI-compatible clients, including streams, auxiliary calls, and fallbacks.
-The `10808` Xray chain endpoint is reused by default.
+The chart runs a native sidecar (`split-proxy`) using the same Hermes image. It
+listens on `127.0.0.1:8118` and speaks HTTP CONNECT:
 
-```bash
-# In the hermes-env Secret
-HTTPS_PROXY=socks5://192.168.1.100:10808
-HTTP_PROXY=socks5://192.168.1.100:10808
+- hosts in `splitProxy.domains` (default `openrouter.ai`) go through x13's
+  SOCKS chain (`splitProxy.socksEndpoint`);
+- every other host connects directly.
+
+The main container receives:
+
+```
+HTTPS_PROXY=http://127.0.0.1:8118
+HTTP_PROXY=http://127.0.0.1:8118
 NO_PROXY=127.0.0.1,localhost,::1
 ```
 
-Telegram uses its own `TELEGRAM_PROXY` (which overrides `HTTPS_PROXY`).
-`NO_PROXY` supports exact hosts, domain suffixes, CIDR ranges, `*.` wildcards,
-and `host:port` entries. Hermes has no per-provider proxy: the env proxy applies
-to every LLM client and to `requests`-based tools. To keep web search direct,
-add its domains to `NO_PROXY`:
+These explicit `env` values override any proxy keys in the `hermes-env` Secret.
+Because the workload speaks HTTP to the sidecar, `requests` and `httpx` need no
+PySocks. This is what fixes `Missing dependencies for SOCKS support.` in Exa,
+Parallel, and Keenable, while keeping their traffic on the direct route.
 
-```bash
-gh variable set NO_PROXY --env production --repo akurin/hermes \
-  --body '127.0.0.1,localhost,::1,exa.ai,parallel.ai,keenable.ai,firecrawl.dev'
+```yaml
+splitProxy:
+  enabled: true
+  port: 8118
+  socksEndpoint: 192.168.1.100:10808
+  domains:
+    - openrouter.ai
 ```
 
-This also avoids the `Missing dependencies for SOCKS support.` error in
-`requests`-based search backends, provided those hosts are reachable directly
-from x13. If they are blocked, use an HTTP CONNECT proxy instead of SOCKS, or
-build an image with PySocks. Set `OPENROUTER_PROXY=direct` in the GitHub
-environment variables to disable the LLM proxy entirely.
+Add `deepseek.com` or search domains if they should be tunneled. Set
+`enabled: false` to fall back to the env-based proxy from `OPENROUTER_PROXY`
+(global, and `requests`-based tools then need PySocks). Telegram keeps its own
+`TELEGRAM_PROXY` and is unaffected.
 
-A `socks5://` proxy requires the image's `httpx[socks]` support; if the pod
-reports a SOCKS transport error, point the proxy at an HTTP CONNECT port on
-Xray instead.
+The sidecar is declared as an `initContainer` with `restartPolicy: Always` and a
+startup probe, so the main container does not start before the listener is
+ready. It runs as UID 10000 with a read-only root filesystem and dropped
+capabilities.
+
+### Environment-based proxy fallback
+
+With `splitProxy.enabled: false`, the workflow's `OPENROUTER_PROXY` is applied
+globally as `HTTPS_PROXY`/`HTTP_PROXY`; `NO_PROXY` is the only exclusion
+mechanism, and `requests`-based backends need PySocks. `OPENROUTER_PROXY=direct`
+disables the proxy entirely. `NO_PROXY` supports exact hosts, domain suffixes,
+CIDR ranges, `*.` wildcards, and `host:port` entries.

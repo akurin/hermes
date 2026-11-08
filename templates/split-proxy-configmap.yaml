@@ -1,0 +1,215 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-split-proxy
+  labels:
+    {{- include "hermes.labels" . | nindent 4 }}
+data:
+  proxy.py: |
+    #!/usr/bin/env python3
+    """HTTP CONNECT proxy that tunnels only selected domains via SOCKS5.
+
+    Clients speak HTTP to this proxy. Targets matching SPLIT_PROXY_DOMAINS go
+    through the SOCKS5 endpoint (remote DNS); everything else connects directly.
+    This keeps requests/httpx clients working without PySocks.
+    """
+
+    import ipaddress
+    import os
+    import select
+    import socket
+    import socketserver
+    import sys
+
+    LISTEN = os.environ.get("SPLIT_PROXY_LISTEN", "127.0.0.1:8118")
+    SOCKS = os.environ.get("SPLIT_PROXY_SOCKS", "192.168.1.100:10808")
+    DOMAINS = tuple(
+        d.strip().lower().rstrip(".")
+        for d in os.environ.get("SPLIT_PROXY_DOMAINS", "openrouter.ai").split(",")
+        if d.strip()
+    )
+
+
+    def parse_hostport(value):
+        value = value.strip()
+        if value.startswith("["):
+            host, _, port = value[1:].partition("]:")
+            return host, int(port) if port else 0
+        host, sep, port = value.rpartition(":")
+        if not sep:
+            return value, 0
+        return host, int(port)
+
+
+    SOCKS_HOST, SOCKS_PORT = parse_hostport(SOCKS)
+    LISTEN_HOST, LISTEN_PORT = parse_hostport(LISTEN)
+
+
+    def should_tunnel(host):
+        host = host.strip().lower().rstrip(".")
+        return any(host == d or host.endswith("." + d) for d in DOMAINS)
+
+
+    def recv_exact(sock, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise OSError("short read")
+            buf += chunk
+        return buf
+
+
+    def socks_connect(host, port):
+        sock = socket.create_connection((SOCKS_HOST, SOCKS_PORT), timeout=15)
+        try:
+            sock.sendall(b"\x05\x01\x00")
+            if recv_exact(sock, 2) != b"\x05\x00":
+                raise OSError("SOCKS5 greeting rejected")
+            try:
+                ip = ipaddress.ip_address(host)
+                addr = (b"\x01" if ip.version == 4 else b"\x04") + ip.packed
+            except ValueError:
+                name = host.encode("idna")
+                if len(name) > 255:
+                    raise OSError("hostname too long")
+                addr = b"\x03" + bytes([len(name)]) + name
+            sock.sendall(b"\x05\x01\x00" + addr + port.to_bytes(2, "big"))
+            head = recv_exact(sock, 4)
+            if head[1] != 0:
+                raise OSError(f"SOCKS5 connect failed ({head[1]})")
+            atyp = head[3]
+            if atyp == 1:
+                recv_exact(sock, 4 + 2)
+            elif atyp == 4:
+                recv_exact(sock, 16 + 2)
+            elif atyp == 3:
+                recv_exact(sock, recv_exact(sock, 1)[0] + 2)
+            else:
+                raise OSError("SOCKS5 bad address type")
+            sock.settimeout(None)
+            return sock
+        except Exception:
+            sock.close()
+            raise
+
+
+    def connect_target(host, port):
+        tunnel = should_tunnel(host)
+        print(f"[split-proxy] {host}:{port} -> {'socks' if tunnel else 'direct'}", flush=True)
+        if tunnel:
+            return socks_connect(host, port)
+        sock = socket.create_connection((host, port), timeout=15)
+        sock.settimeout(None)
+        return sock
+
+
+    def pump(a, b):
+        remaining = [a, b]
+        peers = {a: b, b: a}
+        while remaining:
+            ready, _, _ = select.select(remaining, [], [], 600)
+            if not ready:
+                break
+            for sock in ready:
+                try:
+                    data = sock.recv(65536)
+                except OSError:
+                    data = b""
+                if not data:
+                    remaining.remove(sock)
+                    try:
+                        peers[sock].shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        peers[sock].sendall(data)
+                    except OSError:
+                        return
+
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(30)
+            try:
+                data = b""
+                while b"\r\n\r\n" not in data and len(data) < 65536:
+                    chunk = self.request.recv(4096)
+                    if not chunk:
+                        return
+                    data += chunk
+                head, _, rest = data.partition(b"\r\n\r\n")
+                lines = head.split(b"\r\n")
+                method, target, version = lines[0].decode("latin-1").split(" ", 2)
+
+                if method.upper() == "CONNECT":
+                    host, port = parse_hostport(target)
+                    if not port:
+                        raise OSError("CONNECT target has no port")
+                    upstream = connect_target(host, port)
+                    try:
+                        self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                        if rest:
+                            upstream.sendall(rest)
+                        pump(self.request, upstream)
+                    finally:
+                        upstream.close()
+                    return
+
+                if target.lower().startswith("http://"):
+                    hostport, _, path = target[7:].partition("/")
+                    host, port = parse_hostport(hostport)
+                    port = port or 80
+                    upstream = connect_target(host, port)
+                    try:
+                        headers = [
+                            line
+                            for line in lines[1:]
+                            if not line.lower().startswith(b"proxy-connection:")
+                        ]
+                        request = (
+                            b" ".join([method.encode(), b"/" + path.encode(), version.encode()])
+                            + b"\r\n"
+                            + b"\r\n".join(headers)
+                            + b"\r\n\r\n"
+                        )
+                        upstream.sendall(request + rest)
+                        pump(self.request, upstream)
+                    finally:
+                        upstream.close()
+                    return
+
+                self.request.sendall(
+                    b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+                )
+            except Exception as exc:
+                print(f"[split-proxy] error: {exc}", file=sys.stderr, flush=True)
+                try:
+                    self.request.sendall(
+                        b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
+                    )
+                except OSError:
+                    pass
+
+
+    class Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+        address_family = socket.AF_INET
+
+
+    def main():
+        if not DOMAINS:
+            print("[split-proxy] no tunnel domains; all traffic direct", flush=True)
+        print(
+            f"[split-proxy] listening on {LISTEN_HOST}:{LISTEN_PORT}, "
+            f"SOCKS {SOCKS_HOST}:{SOCKS_PORT}, domains={list(DOMAINS)}",
+            flush=True,
+        )
+        with Server((LISTEN_HOST, LISTEN_PORT), Handler) as server:
+            server.serve_forever()
+
+
+    if __name__ == "__main__":
+        main()
