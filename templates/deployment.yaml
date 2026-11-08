@@ -133,7 +133,7 @@ spec:
             - name: HTTP_PROXY
               value: "http://127.0.0.1:{{ .Values.splitProxy.port }}"
             - name: NO_PROXY
-              value: "127.0.0.1,localhost,::1"
+              value: {{ join "," .Values.splitProxy.noProxy | quote }}
             {{- end }}
             - name: API_SERVER_ENABLED
               value: "false"

@@ -158,6 +158,38 @@ DeepSeek. Because `model.provider` and `model.base_url` are pinned, changing
 the provider itself still requires a chart change. Do not put API keys in
 `values.yaml`.
 
+### Local models via LM Studio
+
+LM Studio at `192.168.1.101:1234` is a named custom provider, selectable per
+session without changing the OpenRouter default:
+
+```bash
+/model custom:lmstudio-lan:<model-id>
+```
+
+`managedConfig.providers.lmstudio-lan` points at
+`http://192.168.1.101:1234/v1`, and `splitProxy.noProxy` contains
+`192.168.1.101`, so local requests bypass the sidecar and connect directly.
+
+Requirements:
+
+- LM Studio Developer tab → **Serve on Network** (not localhost-only).
+- The Hermes pod must stay pinned to x13; the cloud worker has no route to the
+  home LAN.
+- Load a model before switching. Tool calling needs LM Studio 0.3.6+ and a
+  model with native tool support; a ~64k context length is recommended.
+
+Verify from the pod:
+
+```bash
+curl --noproxy '*' -sS http://192.168.1.101:1234/v1/models
+```
+
+Making LM Studio the default would require changing the managed
+`model.provider` (and the pinned OpenRouter `model.base_url`), which also
+changes the default routing for every session; per-session switching avoids
+that.
+
 ### Split proxy sidecar
 
 The chart runs a native sidecar (`split-proxy`) using the same Hermes image. It
@@ -187,6 +219,11 @@ splitProxy:
   socksEndpoint: 192.168.1.100:10808
   domains:
     - openrouter.ai
+  noProxy:
+    - 127.0.0.1
+    - localhost
+    - "::1"
+    - 192.168.1.101
 ```
 
 Add `deepseek.com` or search domains if they should be tunneled. Set

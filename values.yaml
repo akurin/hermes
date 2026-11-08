@@ -15,6 +15,12 @@ splitProxy:
   socksEndpoint: 192.168.1.100:10808
   domains:
     - openrouter.ai
+  # Hosts that bypass the sidecar. The LM Studio box is on the home LAN.
+  noProxy:
+    - 127.0.0.1
+    - localhost
+    - "::1"
+    - 192.168.1.101
   resources:
     requests:
       cpu: 10m
@@ -34,6 +40,11 @@ managedConfig:
     base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
+  # Selectable per session with /model custom:lmstudio-lan:<model-id>.
+  # LM Studio must be served on the LAN (Developer -> Serve on Network).
+  providers:
+    lmstudio-lan:
+      api: http://192.168.1.101:1234/v1
 
 # Copied to /opt/data/config.yaml only when the volume has no config yet.
 # model.default is deliberately not managed, so the CLI can change it later:
