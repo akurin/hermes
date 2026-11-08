@@ -35,8 +35,27 @@ spec:
         nameservers:
           {{- toYaml . | nindent 10 }}
       {{- end }}
-      {{- if .Values.splitProxy.enabled }}
       initContainers:
+        # Seed the default model into the user config only on a fresh volume.
+        # model.default is not managed, so `hermes config set` can change it.
+        - name: seed-config
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if [ ! -f /opt/data/config.yaml ]; then
+                cp /seed/config.yaml /opt/data/config.yaml
+                chown 10000:10000 /opt/data/config.yaml
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: seed-config
+              mountPath: /seed
+              readOnly: true
+        {{- if .Values.splitProxy.enabled }}
         # Native sidecar: starts before the main container, restarts with the
         # pod, and blocks startup until its probe succeeds.
         - name: split-proxy
@@ -134,6 +153,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-data
+        - name: seed-config
+          configMap:
+            name: {{ .Release.Name }}-seed
         - name: managed-config
           configMap:
             name: {{ .Release.Name }}-managed

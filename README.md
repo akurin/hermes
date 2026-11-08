@@ -103,18 +103,23 @@ applies it immediately.
 managedConfig:
   model:
     provider: openrouter
-    default: stealth/crouton-alpha
     base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
+
+# Seeded only when /opt/data/config.yaml does not exist.
+seedConfig:
+  model:
+    default: nvidia/nemotron-3.5-super-vl:free
 ```
 
-Managed keys are leaf-level: pinning `model.*` does not freeze the rest of the
-config. Hermes refuses `hermes config set` on a pinned key, and managed values
-win over the PVC config and the environment. Everything else remains editable
-on the volume and survives redeploys. Because the managed file is world-readable
-by design, API keys stay in the `hermes-env` Secret rather than the managed
-`.env` layer.
+Managed keys are leaf-level: pinning `model.provider` and `model.base_url`
+does not freeze `model.default`. Hermes refuses `hermes config set` on a
+pinned key, and managed values win over the PVC config and the environment.
+`model.default` is deliberately **not** managed, so the CLI can change it.
+Everything else remains editable on the volume and survives redeploys. Because
+the managed file is world-readable by design, API keys stay in the
+`hermes-env` Secret rather than the managed `.env` layer.
 
 Verify the policy from inside the pod:
 
@@ -128,28 +133,30 @@ reports the resolved managed directory.
 
 ### Models: OpenRouter default and DeepSeek fallback
 
+A fresh volume seeds `/opt/data/config.yaml` with:
+
 ```yaml
 model:
-  provider: openrouter
-  default: stealth/crouton-alpha
+  default: nvidia/nemotron-3.5-super-vl:free
 ```
 
-OpenRouter uses its built-in provider, so the default
-`https://openrouter.ai/api/v1` base URL needs no configuration. The key lives
-in the `hermes-env` Secret as `OPENROUTER_API_KEY`.
+OpenRouter's provider and base URL are pinned by managed scope, so the key lives
+in the `hermes-env` Secret as `OPENROUTER_API_KEY` and a stale base URL on the
+PVC cannot redirect traffic. The default model itself is not managed.
 
-New sessions and gateway conversations start on the OpenRouter model. Switch to
-DeepSeek for a session with:
+Change the default through the CLI:
 
+```bash
+kubectl -n hermes exec deploy/hermes -c hermes -- \
+  hermes config set model.default stealth/crouton-alpha
 ```
-/model deepseek:deepseek-flash
-```
 
-Or switch to any other OpenRouter model with
-`/model openrouter:<model-id>`. To change the default, edit `managedConfig` in
-`values.yaml` and redeploy. `model.provider`, `model.default`, and
-`model.base_url` are pinned, so a stale base URL on the PVC cannot redirect
-OpenRouter traffic. Do not put API keys in `values.yaml`.
+The gateway reads the new default for new sessions; restart the deployment if
+you want to be certain. `/model openrouter:<model-id>` inside a chat changes
+only that session; `/model deepseek:deepseek-flash` switches a session to
+DeepSeek. Because `model.provider` and `model.base_url` are pinned, changing
+the provider itself still requires a chart change. Do not put API keys in
+`values.yaml`.
 
 ### Split proxy sidecar
 

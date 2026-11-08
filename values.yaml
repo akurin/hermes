@@ -30,11 +30,17 @@ splitProxy:
 managedConfig:
   model:
     provider: openrouter
-    default: stealth/crouton-alpha
     # Pin the canonical endpoint so a stale base_url on the PVC cannot leak in.
     base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
+
+# Copied to /opt/data/config.yaml only when the volume has no config yet.
+# model.default is deliberately not managed, so the CLI can change it later:
+#   hermes config set model.default <model-id>
+seedConfig:
+  model:
+    default: nvidia/nemotron-3.5-super-vl:free
 
 persistence:
   size: 5Gi
