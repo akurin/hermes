@@ -58,15 +58,24 @@ spec:
           ports:
             - name: split-proxy
               containerPort: {{ .Values.splitProxy.port }}
+          # tcpSocket probes dial the pod IP, which cannot reach a loopback
+          # listener; exec runs inside the sidecar.
           startupProbe:
-            tcpSocket:
-              port: {{ .Values.splitProxy.port }}
+            exec:
+              command:
+                - python3
+                - -c
+                - "import socket; socket.create_connection(('127.0.0.1', {{ .Values.splitProxy.port }}), 2).close()"
             periodSeconds: 1
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
-              port: {{ .Values.splitProxy.port }}
+            exec:
+              command:
+                - python3
+                - -c
+                - "import socket; socket.create_connection(('127.0.0.1', {{ .Values.splitProxy.port }}), 2).close()"
             periodSeconds: 5
+            failureThreshold: 3
           securityContext:
             runAsNonRoot: true
             runAsUser: 10000
