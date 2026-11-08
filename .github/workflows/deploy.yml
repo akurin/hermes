@@ -69,6 +69,9 @@ jobs:
           TELEGRAM_PROXY: ${{ vars.TELEGRAM_PROXY || 'socks5://192.168.1.100:10808' }}
           OPENROUTER_PROXY: ${{ vars.OPENROUTER_PROXY || 'socks5://192.168.1.100:10808' }}
           NO_PROXY: ${{ vars.NO_PROXY || '127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16' }}
+          LMSTUDIO_API_URL: ${{ vars.LMSTUDIO_API_URL || 'http://192.168.1.101:1234/v1' }}
+          # LM Studio auth is optional; a placeholder keeps keyless servers working.
+          LM_API_KEY: ${{ secrets.LM_API_KEY || 'lm-studio' }}
           HERMES_IMAGE_TAG: ${{ vars.HERMES_IMAGE_TAG || 'v0.23.0' }}
         run: |
           set -euo pipefail
@@ -103,6 +106,7 @@ jobs:
             --from-literal=TELEGRAM_ALLOWED_USERS="$TELEGRAM_ALLOWED_USERS"
             --from-literal=DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
             --from-literal=OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
+            --from-literal=LM_API_KEY="$LM_API_KEY"
             --from-literal=TELEGRAM_PROXY="$TELEGRAM_PROXY"
           )
           # Hermes routes LLM API calls through HTTPS_PROXY/HTTP_PROXY and
@@ -125,6 +129,7 @@ jobs:
 
           helm upgrade --install hermes . --namespace hermes \
             --set-string image.tag="$HERMES_IMAGE_TAG" \
+            --set-string 'managedConfig.providers.lmstudio-lan.api'="$LMSTUDIO_API_URL" \
             --atomic --wait --timeout 15m
           kubectl -n hermes rollout restart deployment/hermes
           kubectl -n hermes rollout status deployment/hermes --timeout=300s

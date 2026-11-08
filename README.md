@@ -45,6 +45,7 @@ Create the `production` environment in this repository and add these secrets:
 | `TELEGRAM_BOT_TOKEN` | New bot's token from BotFather; do not reuse Penny's token |
 | `DEEPSEEK_API_KEY` | DeepSeek API key; used as the selectable fallback model |
 | `OPENROUTER_API_KEY` | OpenRouter API key; the default provider |
+| `LM_API_KEY` | *Optional.* LM Studio server token. If unset, the workflow stores a placeholder so keyless LM Studio servers still work |
 
 Optional environment variables:
 
@@ -54,6 +55,7 @@ Optional environment variables:
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
 | `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
+| `LMSTUDIO_API_URL` | LM Studio base URL used by the `lmstudio-lan` provider; defaults to `http://192.168.1.101:1234/v1` |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -104,6 +106,10 @@ managedConfig:
   model:
     provider: openrouter
     base_url: https://openrouter.ai/api/v1
+  providers:
+    lmstudio-lan:
+      api: http://192.168.1.101:1234/v1
+      key_env: LM_API_KEY
   terminal:
     backend: local
 
@@ -158,29 +164,26 @@ DeepSeek. Because `model.provider` and `model.base_url` are pinned, changing
 the provider itself still requires a chart change. Do not put API keys in
 `values.yaml`.
 
-### Local models (manual)
+### Local models via LM Studio
 
-The chart does not hardcode any local model server or IP. All private and
-link-local networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
-`169.254.0.0/16`) bypass the sidecar, so LAN requests connect directly.
+The chart deploys LM Studio as the `providers.lmstudio-lan` entry, so it is
+managed from GitHub Actions. The base URL comes from the `LMSTUDIO_API_URL`
+variable (default `http://192.168.1.101:1234/v1`); the token comes from the
+optional `LM_API_KEY` secret.
 
-Add LM Studio (or Ollama/vLLM) once, in the PVC config:
+All private and link-local networks (`10.0.0.0/8`, `172.16.0.0/12`,
+`192.168.0.0/16`, `169.254.0.0/16`) bypass the sidecar, so LAN requests connect
+directly.
 
-```bash
-kubectl -n hermes exec deploy/hermes -c hermes -- \
-  hermes config set providers.lmstudio-lan.api http://192.168.1.101:1234/v1
-```
-
-Then switch per session:
+Switch per session:
 
 ```
 /model custom:lmstudio-lan:<model-id>
 ```
 
-`providers` is not managed, so this is allowed even though `model.provider`
-and `model.base_url` stay pinned to OpenRouter. The change lives in
-`/opt/data/config.yaml`, so it persists across Helm upgrades and is not reset
-by the chart.
+`model.provider` and `model.base_url` stay pinned to OpenRouter for the default;
+the local provider is selectable per session. Change the URL by updating the
+`LMSTUDIO_API_URL` variable and redeploying — no PVC edit needed.
 
 Requirements:
 
