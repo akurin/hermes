@@ -48,8 +48,9 @@ managedConfig:
 #   /model <model> --provider <provider> --global
 seedConfig:
   model:
-    provider: custom:lmstudio-lan
-    default: google/gemma-4-31b-qat
+    provider: openrouter
+    default: deepseek/deepseek-v4.1-flash-1017
+    base_url: https://openrouter.ai/api/v1
 
 persistence:
   size: 5Gi

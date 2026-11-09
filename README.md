@@ -110,8 +110,9 @@ managedConfig:
 # Seeded only when /opt/data/config.yaml does not exist.
 seedConfig:
   model:
-    provider: custom:lmstudio-lan
-    default: google/gemma-4-31b-qat
+    provider: openrouter
+    default: deepseek/deepseek-v4.1-flash-1017
+    base_url: https://openrouter.ai/api/v1
 ```
 
 Managed keys are leaf-level. Only `terminal.backend` and the LM Studio provider
@@ -131,14 +132,15 @@ kubectl -n hermes exec deploy/hermes -c hermes -- hermes doctor
 `hermes config` names the managed source and pinned keys; `hermes doctor`
 reports the resolved managed directory.
 
-### Models: LM Studio default, OpenRouter available
+### Models: OpenRouter DeepSeek default, LM Studio available
 
 A fresh volume seeds `/opt/data/config.yaml` with:
 
 ```yaml
 model:
-  provider: custom:lmstudio-lan
-  default: google/gemma-4-31b-qat
+  provider: openrouter
+  default: deepseek/deepseek-v4.1-flash-1017
+  base_url: https://openrouter.ai/api/v1
 ```
 
 Change the default from chat:
@@ -151,7 +153,7 @@ Change the default from chat:
 `model.base_url` to `/opt/data/config.yaml`; `/new` then starts on LM Studio.
 Without `--global`, the switch is session-scoped.
 
-Switch back to OpenRouter the same way:
+Switch back to the OpenRouter default the same way:
 
 ```
 /model deepseek/deepseek-v4.1-flash-1017 --provider openrouter --global
@@ -178,7 +180,8 @@ All private and link-local networks (`10.0.0.0/8`, `172.16.0.0/12`,
 `192.168.0.0/16`, `169.254.0.0/16`) bypass the sidecar, so LAN requests connect
 directly.
 
-`seedConfig` makes LM Studio the initial default. Switch per session with:
+`seedConfig` defaults to OpenRouter DeepSeek; LM Studio is available per
+session. Switch with:
 
 ```
 /model --provider lmstudio-lan <model-id>
