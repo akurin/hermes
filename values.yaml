@@ -38,19 +38,18 @@ splitProxy:
 # environment, and hermes config set refuses to change them. Everything not
 # listed here stays editable on the PVC.
 managedConfig:
-  model:
-    provider: openrouter
-    # Pin the canonical endpoint so a stale base_url on the PVC cannot leak in.
-    base_url: https://openrouter.ai/api/v1
+  # model.provider/base_url/default are deliberately user-owned so /model can
+  # change the default from chat, including with --global.
   terminal:
     backend: local
 
 # Copied to /opt/data/config.yaml only when the volume has no config yet.
-# model.default is deliberately not managed, so the CLI can change it later:
-#   hermes config set model.default <model-id>
+# Change it later from chat with:
+#   /model <model> --provider <provider> --global
 seedConfig:
   model:
-    default: nvidia/nemotron-3.5-super-vl:free
+    provider: custom:lmstudio-lan
+    default: google/gemma-4-31b-qat
 
 persistence:
   size: 5Gi

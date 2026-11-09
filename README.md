@@ -56,7 +56,7 @@ Optional environment variables:
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
 | `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
 | `LMSTUDIO_API_URL` | Set to enable the `lmstudio-lan` provider. The workflow injects it into `managedConfig`; no LAN address is stored in the chart. Unset means no provider |
-| `LMSTUDIO_MODEL` | Optional chat model ID for `lmstudio-lan` (e.g. `google/gemma-4-26b-a4b-qat`). Injected as `default_model`, guaranteeing a picker entry when live discovery is cold |
+| `LMSTUDIO_MODEL` | Optional chat model ID for `lmstudio-lan` (e.g. `google/gemma-4-31b-qat`). Injected as `default_model`, guaranteeing a picker entry when live discovery is cold |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -104,25 +104,22 @@ applies it immediately.
 
 ```yaml
 managedConfig:
-  model:
-    provider: openrouter
-    base_url: https://openrouter.ai/api/v1
   terminal:
     backend: local
 
 # Seeded only when /opt/data/config.yaml does not exist.
 seedConfig:
   model:
-    default: nvidia/nemotron-3.5-super-vl:free
+    provider: custom:lmstudio-lan
+    default: google/gemma-4-31b-qat
 ```
 
-Managed keys are leaf-level: pinning `model.provider` and `model.base_url`
-does not freeze `model.default`. Hermes refuses `hermes config set` on a
-pinned key, and managed values win over the PVC config and the environment.
-`model.default` is deliberately **not** managed, so the CLI can change it.
-Everything else remains editable on the volume and survives redeploys. Because
-the managed file is world-readable by design, API keys stay in the
-`hermes-env` Secret rather than the managed `.env` layer.
+Managed keys are leaf-level. Only `terminal.backend` and the LM Studio provider
+definition injected by the workflow are managed; `model.provider`,
+`model.base_url`, and `model.default` are user-owned. That is what lets
+`/model ... --global` change the default from chat. Managed values still win
+over the PVC config and the environment. API keys stay in the `hermes-env`
+Secret rather than the managed `.env` layer.
 
 Verify the policy from inside the pod:
 
@@ -134,31 +131,40 @@ kubectl -n hermes exec deploy/hermes -c hermes -- hermes doctor
 `hermes config` names the managed source and pinned keys; `hermes doctor`
 reports the resolved managed directory.
 
-### Models: OpenRouter default and DeepSeek fallback
+### Models: LM Studio default, OpenRouter available
 
 A fresh volume seeds `/opt/data/config.yaml` with:
 
 ```yaml
 model:
-  default: nvidia/nemotron-3.5-super-vl:free
+  provider: custom:lmstudio-lan
+  default: google/gemma-4-31b-qat
 ```
 
-OpenRouter's provider and base URL are pinned by managed scope, so the key lives
-in the `hermes-env` Secret as `OPENROUTER_API_KEY` and a stale base URL on the
-PVC cannot redirect traffic. The default model itself is not managed.
+Change the default from chat:
 
-Change the default through the CLI:
+```
+/model google/gemma-4-31b-qat --provider lmstudio-lan --global
+```
+
+`--global` writes `model.provider`, `model.default`, and the resolved
+`model.base_url` to `/opt/data/config.yaml`; `/new` then starts on LM Studio.
+Without `--global`, the switch is session-scoped.
+
+Switch back to OpenRouter the same way:
+
+```
+/model deepseek/deepseek-v4.1-flash-1017 --provider openrouter --global
+```
+
+After a `--global` switch, verify and clear a stale base URL if present:
 
 ```bash
-kubectl -n hermes exec deploy/hermes -c hermes -- \
-  hermes config set model.default stealth/crouton-alpha
+kubectl -n hermes exec deploy/hermes -c hermes -- hermes config get model
+kubectl -n hermes exec deploy/hermes -c hermes -- hermes config unset model.base_url
 ```
 
-The gateway reads the new default for new sessions; restart the deployment if
-you want to be certain. `/model openrouter:<model-id>` inside a chat changes
-only that session; `/model deepseek:deepseek-flash` switches a session to
-DeepSeek. Because `model.provider` and `model.base_url` are pinned, changing
-the provider itself still requires a chart change. Do not put API keys in
+`OPENROUTER_API_KEY` stays in the `hermes-env` Secret. Do not put API keys in
 `values.yaml`.
 
 ### Local models via LM Studio
@@ -172,17 +178,21 @@ All private and link-local networks (`10.0.0.0/8`, `172.16.0.0/12`,
 `192.168.0.0/16`, `169.254.0.0/16`) bypass the sidecar, so LAN requests connect
 directly.
 
-Switch per session:
+`seedConfig` makes LM Studio the initial default. Switch per session with:
 
 ```
-/model custom:lmstudio-lan:<model-id>
+/model --provider lmstudio-lan <model-id>
 ```
 
-`model.provider` and `model.base_url` stay pinned to OpenRouter for the default;
-the local provider is selectable per session. Change the URL by updating the
-`LMSTUDIO_API_URL` variable and redeploying — no PVC edit needed. Setting
-`LMSTUDIO_MODEL` adds a `default_model` entry so the picker has a model even
-when the live catalog probe is cold.
+or persist it from chat:
+
+```
+/model <model-id> --provider lmstudio-lan --global
+```
+
+Change the URL by updating the `LMSTUDIO_API_URL` variable and redeploying — no
+PVC edit needed. `LMSTUDIO_MODEL` adds a declared model so the picker has an
+entry even when the live catalog probe is cold.
 
 Requirements:
 
@@ -197,10 +207,6 @@ Verify from the pod:
 ```bash
 curl --noproxy '*' -sS http://192.168.1.101:1234/v1/models
 ```
-
-To make a local model the default, you would have to change the managed
-`model.provider` and `model.base_url`, which also changes routing for every
-session; per-session switching avoids that.
 
 ### Split proxy sidecar
 
