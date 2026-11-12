@@ -69,18 +69,25 @@ jobs:
           TELEGRAM_PROXY: ${{ vars.TELEGRAM_PROXY || 'socks5://192.168.1.100:10808' }}
           OPENROUTER_PROXY: ${{ vars.OPENROUTER_PROXY || 'socks5://192.168.1.100:10808' }}
           NO_PROXY: ${{ vars.NO_PROXY || '127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16' }}
-          LMSTUDIO_API_URL: ${{ vars.LMSTUDIO_API_URL }}
-          # LM Studio auth is optional; a placeholder keeps keyless servers working.
-          LM_API_KEY: ${{ secrets.LM_API_KEY || 'lm-studio' }}
-          LMSTUDIO_MODEL: ${{ vars.LMSTUDIO_MODEL }}
+          STRATA_API_URL: ${{ vars.STRATA_API_URL }}
+          STRATA_API_KEY: ${{ secrets.STRATA_API_KEY }}
+          UNSLOTH_API_URL: ${{ vars.UNSLOTH_API_URL }}
+          UNSLOTH_API_KEY: ${{ secrets.UNSLOTH_API_KEY }}
           HERMES_IMAGE_TAG: ${{ vars.HERMES_IMAGE_TAG || 'v0.23.0' }}
         run: |
           set -euo pipefail
           umask 077
           for name in KUBECONFIG_CONTENT CI_DEPLOY_SSH_KEY K3S_HOST \
-            TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS DEEPSEEK_API_KEY OPENROUTER_API_KEY; do
+            TELEGRAM_BOT_TOKEN DEEPSEEK_API_KEY OPENROUTER_API_KEY \
+            STRATA_API_KEY UNSLOTH_API_KEY; do
             if test -z "${!name}"; then
               echo "Missing production secret: $name" >&2
+              exit 1
+            fi
+          done
+          for name in TELEGRAM_ALLOWED_USERS STRATA_API_URL UNSLOTH_API_URL; do
+            if test -z "${!name}"; then
+              echo "Missing production variable: $name" >&2
               exit 1
             fi
           done
@@ -107,7 +114,8 @@ jobs:
             --from-literal=TELEGRAM_ALLOWED_USERS="$TELEGRAM_ALLOWED_USERS"
             --from-literal=DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
             --from-literal=OPENROUTER_API_KEY="$OPENROUTER_API_KEY"
-            --from-literal=LM_API_KEY="$LM_API_KEY"
+            --from-literal=STRATA_API_KEY="$STRATA_API_KEY"
+            --from-literal=UNSLOTH_API_KEY="$UNSLOTH_API_KEY"
             --from-literal=TELEGRAM_PROXY="$TELEGRAM_PROXY"
           )
           # Hermes routes LLM API calls through HTTPS_PROXY/HTTP_PROXY and
@@ -128,23 +136,17 @@ jobs:
           kubectl -n hermes delete secret hermes-env --ignore-not-found
           kubectl -n hermes create secret generic hermes-env "${secret_args[@]}"
 
-          # LM Studio is opt-in: the provider is injected only when the GitHub
-          # environment variable is set, so the chart contains no LAN address.
+          # Provider URLs are non-secret; keys stay in hermes-env. Managed
+          # provider entries also take effect on existing Hermes PVCs.
           helm_args=(
             --set-string image.tag="$HERMES_IMAGE_TAG"
+            --set-string 'managedConfig.providers.strata.api'="$STRATA_API_URL"
+            --set-string 'managedConfig.providers.strata.key_env'=STRATA_API_KEY
+            --set-string 'managedConfig.providers.unsloth.api'="$UNSLOTH_API_URL"
+            --set-string 'managedConfig.providers.unsloth.key_env'=UNSLOTH_API_KEY
           )
-          if [[ -n "${LMSTUDIO_API_URL:-}" ]]; then
-            helm_args+=(
-              --set-string 'managedConfig.providers.lmstudio-lan.api'="$LMSTUDIO_API_URL"
-              --set-string 'managedConfig.providers.lmstudio-lan.key_env'=LM_API_KEY
-            )
-            if [[ -n "${LMSTUDIO_MODEL:-}" ]]; then
-              helm_args+=(
-                --set-string 'managedConfig.providers.lmstudio-lan.default_model'="$LMSTUDIO_MODEL"
-              )
-            fi
-          fi
-          helm upgrade --install hermes . --namespace hermes \
+          # Drop provider values from older releases, including lmstudio-lan.
+          helm upgrade --install hermes . --namespace hermes --reset-values \
             "${helm_args[@]}" --atomic --wait --timeout 15m
           kubectl -n hermes rollout restart deployment/hermes
           kubectl -n hermes rollout status deployment/hermes --timeout=300s

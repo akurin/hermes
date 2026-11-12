@@ -45,18 +45,19 @@ Create the `production` environment in this repository and add these secrets:
 | `TELEGRAM_BOT_TOKEN` | New bot's token from BotFather; do not reuse Penny's token |
 | `DEEPSEEK_API_KEY` | DeepSeek API key; used as the selectable fallback model |
 | `OPENROUTER_API_KEY` | OpenRouter API key; the default provider |
-| `LM_API_KEY` | *Optional.* LM Studio server token. If unset, the workflow stores a placeholder so keyless LM Studio servers still work |
+| `STRATA_API_KEY` | API key for the Strata endpoint on port 47832 |
+| `UNSLOTH_API_KEY` | API key for the Unsloth Desktop endpoint on port 8888 |
 
-Optional environment variables:
+Environment variables (set the required entries before deploying):
 
 | Variable | Purpose |
 | --- | --- |
-| `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric Telegram user IDs authorized to use Hermes. Required; not sensitive, so it lives as a variable |
+| `TELEGRAM_ALLOWED_USERS` | **Required.** Comma-separated numeric Telegram user IDs authorized to use Hermes |
+| `STRATA_API_URL` | **Required.** Set to `http://192.168.1.101:47832/v1` |
+| `UNSLOTH_API_URL` | **Required.** Set to `http://192.168.1.101:8888/v1` |
 | `TELEGRAM_PROXY` | Override the default `socks5://192.168.1.100:10808` Xray chain endpoint if it changes |
 | `OPENROUTER_PROXY` | *Fallback only.* Used when `splitProxy.enabled: false`; the sidecar overrides it. Defaults to the Xray chain endpoint; `direct` disables proxying |
 | `NO_PROXY` | *Fallback only.* Exclusions for the env-based proxy; the sidecar bypasses loopback, private, and link-local ranges. Supports domain suffixes, CIDRs, `*.` wildcards, and `host:port` |
-| `LMSTUDIO_API_URL` | Set to enable the `lmstudio-lan` provider. The workflow injects it into `managedConfig`; no LAN address is stored in the chart. Unset means no provider |
-| `LMSTUDIO_MODEL` | Optional chat model ID for `lmstudio-lan` (e.g. `google/gemma-4-31b-qat`). Injected as `default_model`, guaranteeing a picker entry when live discovery is cold |
 | `HERMES_IMAGE_TAG` | Official image tag; defaults to `v0.23.0` |
 
 The workflow recreates the `hermes-env` Kubernetes Secret before Helm installs
@@ -66,10 +67,9 @@ values. A push to
 `master` runs chart checks and deploys after they pass. `workflow_dispatch`
 runs the same checks before deploying. Secrets are scoped to this repository's
 production environment; Penny's GitHub environment does not share them.
-Telegram and LLM API traffic (OpenRouter and DeepSeek) use x13's Xray `10808`
-chain endpoint because their direct routes are blocked at home. Hermes applies
-`OPENROUTER_PROXY` as `HTTPS_PROXY`/`HTTP_PROXY` for LLM calls and sets
-`NO_PROXY=127.0.0.1,localhost,::1`, so only loopback bypasses the proxy.
+Telegram and cloud LLM traffic use x13's Xray `10808` chain endpoint because
+their direct routes are blocked at home. The Strata and Unsloth LAN endpoints
+bypass the split proxy through the private-network `NO_PROXY` ranges.
 
 ## First deployment and checks
 
@@ -115,8 +115,8 @@ seedConfig:
     base_url: https://openrouter.ai/api/v1
 ```
 
-Managed keys are leaf-level. Only `terminal.backend` and the LM Studio provider
-definition injected by the workflow are managed; `model.provider`,
+Managed keys are leaf-level. `terminal.backend` and the Strata and Unsloth
+provider definitions injected by the workflow are managed; `model.provider`,
 `model.base_url`, and `model.default` are user-owned. That is what lets
 `/model ... --global` change the default from chat. Managed values still win
 over the PVC config and the environment. API keys stay in the `hermes-env`
@@ -132,7 +132,7 @@ kubectl -n hermes exec deploy/hermes -c hermes -- hermes doctor
 `hermes config` names the managed source and pinned keys; `hermes doctor`
 reports the resolved managed directory.
 
-### Models: OpenRouter DeepSeek default, LM Studio available
+### Models: OpenRouter DeepSeek default, LAN providers available
 
 A fresh volume seeds `/opt/data/config.yaml` with:
 
@@ -143,15 +143,18 @@ model:
   base_url: https://openrouter.ai/api/v1
 ```
 
-Change the default from chat:
+Switch to a LAN model from chat, using a model ID served by that endpoint:
 
 ```
-/model google/gemma-4-31b-qat --provider lmstudio-lan --global
+/model custom:strata:<model-id>
+/model custom:unsloth:<model-id>
 ```
 
-`--global` writes `model.provider`, `model.default`, and the resolved
-`model.base_url` to `/opt/data/config.yaml`; `/new` then starts on LM Studio.
-Without `--global`, the switch is session-scoped.
+Add `--global` to either command to save it as the default in
+`/opt/data/config.yaml`; `/new` then starts on that provider. Without
+`--global`, the switch is session-scoped. An existing PVC keeps its manually
+configured default when the LAN providers are added; only the managed provider
+definitions take effect on deployment.
 
 Switch back to the OpenRouter default the same way:
 
@@ -159,57 +162,52 @@ Switch back to the OpenRouter default the same way:
 /model deepseek/deepseek-v4.1-flash-1017 --provider openrouter --global
 ```
 
-After a `--global` switch, verify and clear a stale base URL if present:
+If a switch routes to an unexpected endpoint, inspect the saved model config
+and clear a stale `model.base_url` if present:
 
 ```bash
 kubectl -n hermes exec deploy/hermes -c hermes -- hermes config get model
 kubectl -n hermes exec deploy/hermes -c hermes -- hermes config unset model.base_url
 ```
 
-`OPENROUTER_API_KEY` stays in the `hermes-env` Secret. Do not put API keys in
+All provider API keys stay in the `hermes-env` Secret. Do not put API keys in
 `values.yaml`.
 
-### Local models via LM Studio
+### Local models via Strata and Unsloth Desktop
 
-The chart contains no LM Studio address. When the `LMSTUDIO_API_URL` GitHub
-environment variable is set, the deploy workflow injects the
-`providers.lmstudio-lan` entry with that URL; the token comes from the optional
-`LM_API_KEY` secret. Unset the variable and redeploy to remove the provider.
+The deploy workflow injects `providers.strata` and `providers.unsloth` into
+`managedConfig`, using the URLs above. Their keys come from the required
+`STRATA_API_KEY` and `UNSLOTH_API_KEY` GitHub production secrets. Update either
+URL variable and redeploy to change its endpoint; no PVC edit is needed. Hermes
+discovers available models from each authenticated `/v1/models` endpoint, so
+there is no model ID to maintain in the workflow. If an endpoint does not
+provide that listing, declare its models in the provider config instead.
+
+The workflow resets Helm values on upgrade, so a previously injected
+`providers.lmstudio-lan` entry is removed from managed config. If you added an
+LM Studio provider directly to `/opt/data/config.yaml`, remove that manual
+entry separately. If your saved default still selects LM Studio, switch it to
+Strata, Unsloth, or OpenRouter with `/model ... --global`.
 
 All private and link-local networks (`10.0.0.0/8`, `172.16.0.0/12`,
 `192.168.0.0/16`, `169.254.0.0/16`) bypass the sidecar, so LAN requests connect
 directly.
 
-`seedConfig` defaults to OpenRouter DeepSeek; LM Studio is available per
-session. Switch with:
-
-```
-/model --provider lmstudio-lan <model-id>
-```
-
-or persist it from chat:
-
-```
-/model <model-id> --provider lmstudio-lan --global
-```
-
-Change the URL by updating the `LMSTUDIO_API_URL` variable and redeploying — no
-PVC edit needed. `LMSTUDIO_MODEL` adds a declared model so the picker has an
-entry even when the live catalog probe is cold.
+`seedConfig` still defaults to OpenRouter DeepSeek on a fresh PVC. Use the
+`/model custom:<provider>:<model-id>` commands above to select a LAN provider.
 
 Requirements:
 
-- LM Studio Developer tab → **Serve on Network** (not localhost-only).
+- Both servers must listen on the LAN rather than localhost only.
 - The Hermes pod must stay pinned to x13; the cloud worker has no route to the
   home LAN.
-- Load a model before switching. Tool calling needs LM Studio 0.3.6+ and a
-  model with native tool support; a ~64k context length is recommended.
+- Load a model before switching. For tool use, choose a model and server that
+  support OpenAI-compatible tool calls; a ~64k context length is recommended.
 
 Verify from the pod:
 
-```bash
-curl --noproxy '*' -sS http://192.168.1.101:1234/v1/models
-```
+Run `hermes doctor` in the pod, then query each server's `/v1/models` with its
+respective bearer token. Do not print the API keys into the pod logs.
 
 ### Split proxy sidecar
 
